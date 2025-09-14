@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prairie Driving Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #87CEEB;
+            font-family: Arial, sans-serif;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            font-size: 14px;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            z-index: 200;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="loading">Loading Prairie Adventure...</div>
+        <div id="ui">
+            <h2>Prairie Driving Game</h2>
+            <div>Speed: <span id="speed">0</span> mph</div>
+        </div>
+        <div id="controls">
+            <div>WASD or Arrow Keys: Drive</div>
+            <div>Space: Brake</div>
+            <div>Mouse: Look around</div>
+        </div>
+    </div>
+
+    <!-- Three.js -->
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+    <!-- Cannon.js for physics (local) -->
+    <script src="cannon.min.js"></script>
+    
+    <script src="game.js"></script>
+</body>
+</html>
