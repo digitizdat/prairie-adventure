@@ -13,6 +13,7 @@ class PrairieDrivingGame {
         this.speed = 0;
         this.terrainSize = 200;
         this.terrainResolution = 64;
+        this.collisionObjects = []; // Store objects for collision detection
         
         this.init();
     }
@@ -145,38 +146,53 @@ class PrairieDrivingGame {
     }
 
     createEnvironment() {
-        // Add rocks (visual only)
+        // Add rocks
         for (let i = 0; i < 20; i++) {
-            const rockGeometry = new THREE.DodecahedronGeometry(Math.random() * 2 + 1);
+            const rockSize = Math.random() * 2 + 1;
+            const rockGeometry = new THREE.DodecahedronGeometry(rockSize);
             const rockMaterial = new THREE.MeshLambertMaterial({ color: 0x696969 });
             const rock = new THREE.Mesh(rockGeometry, rockMaterial);
             
-            rock.position.set(
-                (Math.random() - 0.5) * 180,
-                0.5,
-                (Math.random() - 0.5) * 180
-            );
+            const x = (Math.random() - 0.5) * 180;
+            const z = (Math.random() - 0.5) * 180;
+            const terrainHeight = this.getTerrainHeight(x, z);
+            
+            rock.position.set(x, terrainHeight + 0.5, z);
             rock.castShadow = true;
             this.scene.add(rock);
+            
+            // Store collision data
+            this.collisionObjects.push({
+                position: { x: x, z: z },
+                radius: rockSize + 0.5, // Add some buffer for collision
+                type: 'rock'
+            });
         }
 
-        // Add logs (visual only)
+        // Add logs
         for (let i = 0; i < 15; i++) {
             const logGeometry = new THREE.CylinderGeometry(0.3, 0.3, 6);
             const logMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
             const log = new THREE.Mesh(logGeometry, logMaterial);
             
-            log.position.set(
-                (Math.random() - 0.5) * 160,
-                0.3,
-                (Math.random() - 0.5) * 160
-            );
+            const x = (Math.random() - 0.5) * 160;
+            const z = (Math.random() - 0.5) * 160;
+            const terrainHeight = this.getTerrainHeight(x, z);
+            
+            log.position.set(x, terrainHeight + 0.3, z);
             log.rotation.z = Math.random() * Math.PI;
             log.castShadow = true;
             this.scene.add(log);
+            
+            // Store collision data (logs are cylindrical, use radius of 3 for length)
+            this.collisionObjects.push({
+                position: { x: x, z: z },
+                radius: 3.2, // Half the log length plus buffer
+                type: 'log'
+            });
         }
 
-        // Add some trees
+        // Add trees
         for (let i = 0; i < 30; i++) {
             const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 4);
             const trunkMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
@@ -191,13 +207,20 @@ class PrairieDrivingGame {
             tree.add(trunk);
             tree.add(leaves);
             
-            tree.position.set(
-                (Math.random() - 0.5) * 200,
-                0,
-                (Math.random() - 0.5) * 200
-            );
+            const x = (Math.random() - 0.5) * 200;
+            const z = (Math.random() - 0.5) * 200;
+            const terrainHeight = this.getTerrainHeight(x, z);
+            
+            tree.position.set(x, terrainHeight, z);
             tree.castShadow = true;
             this.scene.add(tree);
+            
+            // Store collision data (use leaves radius for collision)
+            this.collisionObjects.push({
+                position: { x: x, z: z },
+                radius: 2.5, // Leaves radius plus buffer
+                type: 'tree'
+            });
         }
     }
 
@@ -247,6 +270,21 @@ class PrairieDrivingGame {
         // });
     }
 
+    checkCollisions(newX, newZ) {
+        const vehicleRadius = 2; // Vehicle collision radius
+        
+        for (let obj of this.collisionObjects) {
+            const dx = newX - obj.position.x;
+            const dz = newZ - obj.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            if (distance < (vehicleRadius + obj.radius)) {
+                return true; // Collision detected
+            }
+        }
+        return false; // No collision
+    }
+
     updateVehicle() {
         const deltaTime = this.clock.getDelta();
         
@@ -284,9 +322,19 @@ class PrairieDrivingGame {
         const moveX = -Math.sin(this.vehicleRotation) * this.speed * deltaTime;
         const moveZ = -Math.cos(this.vehicleRotation) * this.speed * deltaTime;
         
-        // Update position
-        this.vehiclePosition.x += moveX;
-        this.vehiclePosition.z += moveZ;
+        // Calculate new position
+        const newX = this.vehiclePosition.x + moveX;
+        const newZ = this.vehiclePosition.z + moveZ;
+        
+        // Check for collisions before moving
+        if (!this.checkCollisions(newX, newZ)) {
+            // No collision, update position
+            this.vehiclePosition.x = newX;
+            this.vehiclePosition.z = newZ;
+        } else {
+            // Collision detected, stop the vehicle
+            this.speed *= 0.1; // Dramatically reduce speed on collision
+        }
         
         // Get terrain height at vehicle position and add vehicle height offset
         const terrainHeight = this.getTerrainHeight(this.vehiclePosition.x, this.vehiclePosition.z);
