@@ -34,7 +34,7 @@ A 3D prairie driving game built with Three.js featuring procedurally generated t
 
 1. **Clone or download the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/digitizdat/prairie-adventure
    cd prairie-adventure
    ```
 
