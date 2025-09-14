@@ -11,11 +11,43 @@ class PrairieDrivingGame {
         this.vehiclePosition = new THREE.Vector3(0, 0.75, 0);
         this.vehicleRotation = 0;
         this.speed = 0;
+        this.maxSpeed = 8.0; // Base maximum speed (significantly increased)
+        this.maxDownhillSpeed = this.maxSpeed * 1.5; // 50% more when going downhill
+        this.minUphillSpeed = this.maxSpeed * 0.75; // 25% less when going uphill
         this.terrainSize = 200;
         this.terrainResolution = 64;
         this.collisionObjects = []; // Store objects for collision detection
+        this.damageLevel = 0; // 0=pristine, 1=minor, 2=major, 3=wrecked
+        this.vehicleParts = {}; // Store references to vehicle parts for damage
+        this.lastCollisionTime = 0; // Prevent multiple damage applications
+        this.collisionCooldown = 2000; // 2 seconds between damage applications
 
         this.init();
+    }
+
+    // Calculate terrain slope at given position
+    getTerrainSlope(x, z) {
+        const sampleDistance = 1.0; // Distance to sample for slope calculation
+
+        // Get height at current position and nearby positions
+        const currentHeight = this.getTerrainHeight(x, z);
+        const frontHeight = this.getTerrainHeight(x, z - sampleDistance);
+        const backHeight = this.getTerrainHeight(x, z + sampleDistance);
+        const leftHeight = this.getTerrainHeight(x - sampleDistance, z);
+        const rightHeight = this.getTerrainHeight(x + sampleDistance, z);
+
+        // Calculate slopes in both directions
+        const slopeZ = (frontHeight - backHeight) / (2 * sampleDistance); // Forward/backward slope
+        const slopeX = (rightHeight - leftHeight) / (2 * sampleDistance); // Left/right slope
+
+        // Return the slope in the direction of movement
+        const cos = Math.cos(this.vehicleRotation);
+        const sin = Math.sin(this.vehicleRotation);
+
+        // Project slope onto movement direction
+        const movementSlope = slopeZ * cos + slopeX * sin;
+
+        return movementSlope;
     }
 
     init() {
@@ -120,35 +152,282 @@ class PrairieDrivingGame {
     }
 
     createVehicle() {
-        // Create jeep body
-        const bodyGeometry = new THREE.BoxGeometry(4, 1.5, 2);
-        const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
-        const vehicleBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        vehicleBody.position.set(0, 3, 0); // Start closer to ground level
-        vehicleBody.castShadow = true;
+        // Main vehicle group
+        this.vehicle = new THREE.Group();
 
-        // Create wheels
-        const wheelGeometry = new THREE.CylinderGeometry(1, 1, 0.5, 16);
-        const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+        // Create realistic jeep body with open wheel wells
+        const bodyGroup = new THREE.Group();
 
-        const wheels = [];
+        // Main body center section
+        const centerBodyGeometry = new THREE.BoxGeometry(2.4, 1.8, 6.6);
+        const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x2f4f2f });
+        const centerBody = new THREE.Mesh(centerBodyGeometry, bodyMaterial);
+        centerBody.position.set(0, 0.2, 0);
+        centerBody.castShadow = true;
+        bodyGroup.add(centerBody);
+
+        // Side panels (between wheels)
+        const sidePanelGeometry = new THREE.BoxGeometry(0.6, 1.8, 2.2);
+
+        const leftSidePanel = new THREE.Mesh(sidePanelGeometry, bodyMaterial);
+        leftSidePanel.position.set(-1.5, 0.2, 0);
+        leftSidePanel.castShadow = true;
+        bodyGroup.add(leftSidePanel);
+
+        const rightSidePanel = new THREE.Mesh(sidePanelGeometry, bodyMaterial);
+        rightSidePanel.position.set(1.5, 0.2, 0);
+        rightSidePanel.castShadow = true;
+        bodyGroup.add(rightSidePanel);
+
+        this.vehicle.add(bodyGroup);
+        this.vehicleParts.body = bodyGroup;
+
+        // Create hood
+        const hoodGeometry = new THREE.BoxGeometry(3.6, 0.3, 2.2); // Adjusted for reduced length
+        const hoodMaterial = new THREE.MeshLambertMaterial({ color: 0x2f4f2f });
+        const hood = new THREE.Mesh(hoodGeometry, hoodMaterial);
+        hood.position.set(0, 1.05, -2.2); // Positioned at front (negative Z)
+        hood.castShadow = true;
+        this.vehicle.add(hood);
+        this.vehicleParts.hood = hood;
+
+        // Create front grille
+        const grilleGeometry = new THREE.BoxGeometry(2.8, 1.2, 0.1); // Narrower grille
+        const grilleMaterial = new THREE.MeshLambertMaterial({ color: 0x1c1c1c });
+        const grille = new THREE.Mesh(grilleGeometry, grilleMaterial);
+        grille.position.set(0, 0.3, -3.35); // Moved to actual front (negative Z is forward)
+        grille.castShadow = true;
+        this.vehicle.add(grille);
+        this.vehicleParts.grille = grille;
+
+        // Create headlights (at the front)
+        const headlightGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.2, 16);
+        const headlightMaterial = new THREE.MeshLambertMaterial({ color: 0xfffff0 });
+
+        const leftHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+        leftHeadlight.position.set(-1.0, 0.6, -3.4); // At the front of the vehicle (negative Z)
+        leftHeadlight.rotation.x = Math.PI / 2;
+        leftHeadlight.castShadow = true;
+        this.vehicle.add(leftHeadlight);
+
+        const rightHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+        rightHeadlight.position.set(1.0, 0.6, -3.4); // At the front of the vehicle (negative Z)
+        rightHeadlight.rotation.x = Math.PI / 2;
+        rightHeadlight.castShadow = true;
+        this.vehicle.add(rightHeadlight);
+
+        this.vehicleParts.headlights = [leftHeadlight, rightHeadlight];
+
+        // Create realistic wheels with treads
+        const wheelGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.4, 16);
+        const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x1c1c1c });
+        const rimGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.45, 16);
+        const rimMaterial = new THREE.MeshLambertMaterial({ color: 0x696969 });
+
         const wheelPositions = [
-            [-1.5, -0.5, 1.2], // front left
-            [1.5, -0.5, 1.2], // front right
-            [-1.5, -0.5, -1.2], // rear left
-            [1.5, -0.5, -1.2], // rear right
+            [-1.35, -0.7, -2.1], // front left (negative Z is forward)
+            [1.35, -0.7, -2.1], // front right
+            [-1.35, -0.7, 2.1], // rear left (positive Z is back)
+            [1.35, -0.7, 2.1], // rear right
         ];
 
+        this.vehicleParts.wheels = [];
         wheelPositions.forEach((pos, index) => {
+            const wheelGroup = new THREE.Group();
+
             const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
             wheel.rotation.z = Math.PI / 2;
-            wheel.position.set(pos[0], pos[1], pos[2]);
-            wheel.castShadow = true;
-            wheels.push(wheel);
-            vehicleBody.add(wheel);
+            wheelGroup.add(wheel);
+
+            const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+            rim.rotation.z = Math.PI / 2;
+            wheelGroup.add(rim);
+
+            wheelGroup.position.set(pos[0], pos[1], pos[2]);
+            wheelGroup.castShadow = true;
+            this.vehicleParts.wheels.push(wheelGroup);
+            this.vehicle.add(wheelGroup);
         });
 
-        this.vehicle = vehicleBody;
+        // Create realistic doors with window frames (aligned with back of hood)
+        const doorGeometry = new THREE.BoxGeometry(0.08, 1.4, 2.4); // Adjusted for reduced length
+        const doorMaterial = new THREE.MeshLambertMaterial({ color: 0x2f4f2f });
+
+        const leftDoor = new THREE.Mesh(doorGeometry, doorMaterial);
+        leftDoor.position.set(-1.84, 0.2, 0.0); // Front edge aligns with back of hood
+        leftDoor.castShadow = true;
+        this.vehicle.add(leftDoor);
+        this.vehicleParts.leftDoor = leftDoor;
+
+        const rightDoor = new THREE.Mesh(doorGeometry, doorMaterial);
+        rightDoor.position.set(1.84, 0.2, 0.0); // Front edge aligns with back of hood
+        rightDoor.castShadow = true;
+        this.vehicle.add(rightDoor);
+        this.vehicleParts.rightDoor = rightDoor;
+
+        // Windshield frame will be the roll bars - removed separate frame
+
+        // Create windshield (will be positioned within roll bars later)
+        const windshieldGeometry = new THREE.PlaneGeometry(2.0, 1.2);
+        const windshieldMaterial = new THREE.MeshLambertMaterial({
+            color: 0xc0c0c0, // Light grey
+            transparent: true,
+            opacity: 0.7, // Higher opacity for better visibility
+            side: THREE.DoubleSide, // Make sure it's visible from both sides
+        });
+        const windshield = new THREE.Mesh(windshieldGeometry, windshieldMaterial);
+        windshield.position.set(0, 1.6, -1.2); // Positioned within roll bars
+        windshield.rotation.x = -Math.PI / 12; // Slight angle
+        windshield.castShadow = true;
+        this.vehicle.add(windshield);
+        this.vehicleParts.windshield = windshield;
+
+        // Create windshield crack overlays (initially invisible)
+        this.vehicleParts.windshieldCracks = [];
+
+        // Single crack for damage level 1
+        const singleCrackGeometry = new THREE.PlaneGeometry(2.0, 1.2);
+        const singleCrackCanvas = document.createElement('canvas');
+        singleCrackCanvas.width = 256;
+        singleCrackCanvas.height = 256;
+        const singleCrackCtx = singleCrackCanvas.getContext('2d');
+        singleCrackCtx.strokeStyle = 'black';
+        singleCrackCtx.lineWidth = 3;
+        singleCrackCtx.beginPath();
+        singleCrackCtx.moveTo(50, 128);
+        singleCrackCtx.lineTo(80, 100);
+        singleCrackCtx.lineTo(120, 110);
+        singleCrackCtx.lineTo(150, 80);
+        singleCrackCtx.lineTo(200, 90);
+        singleCrackCtx.stroke();
+
+        const singleCrackTexture = new THREE.CanvasTexture(singleCrackCanvas);
+        const singleCrackMaterial = new THREE.MeshLambertMaterial({
+            map: singleCrackTexture,
+            transparent: true,
+            opacity: 0,
+        });
+        const singleCrack = new THREE.Mesh(singleCrackGeometry, singleCrackMaterial);
+        singleCrack.position.set(0, 1.6, -1.19);
+        singleCrack.rotation.x = -Math.PI / 12;
+        this.vehicle.add(singleCrack);
+        this.vehicleParts.windshieldCracks.push(singleCrack);
+
+        // Multiple cracks for damage level 2
+        const multipleCrackCanvas = document.createElement('canvas');
+        multipleCrackCanvas.width = 256;
+        multipleCrackCanvas.height = 256;
+        const multipleCrackCtx = multipleCrackCanvas.getContext('2d');
+        multipleCrackCtx.strokeStyle = 'black';
+        multipleCrackCtx.lineWidth = 2;
+
+        // Draw multiple jagged cracks
+        multipleCrackCtx.beginPath();
+        multipleCrackCtx.moveTo(30, 100);
+        multipleCrackCtx.lineTo(60, 80);
+        multipleCrackCtx.lineTo(90, 90);
+        multipleCrackCtx.lineTo(120, 70);
+        multipleCrackCtx.lineTo(150, 75);
+        multipleCrackCtx.stroke();
+
+        multipleCrackCtx.beginPath();
+        multipleCrackCtx.moveTo(70, 150);
+        multipleCrackCtx.lineTo(100, 130);
+        multipleCrackCtx.lineTo(130, 140);
+        multipleCrackCtx.lineTo(160, 120);
+        multipleCrackCtx.lineTo(190, 125);
+        multipleCrackCtx.stroke();
+
+        multipleCrackCtx.beginPath();
+        multipleCrackCtx.moveTo(40, 200);
+        multipleCrackCtx.lineTo(70, 180);
+        multipleCrackCtx.lineTo(100, 190);
+        multipleCrackCtx.lineTo(130, 170);
+        multipleCrackCtx.stroke();
+
+        const multipleCrackTexture = new THREE.CanvasTexture(multipleCrackCanvas);
+        const multipleCrackMaterial = new THREE.MeshLambertMaterial({
+            map: multipleCrackTexture,
+            transparent: true,
+            opacity: 0,
+        });
+        const multipleCracks = new THREE.Mesh(singleCrackGeometry, multipleCrackMaterial);
+        multipleCracks.position.set(0, 1.6, -1.18);
+        multipleCracks.rotation.x = -Math.PI / 12;
+        this.vehicle.add(multipleCracks);
+        this.vehicleParts.windshieldCracks.push(multipleCracks);
+
+        // Create front bumper
+        const bumperGeometry = new THREE.BoxGeometry(3.8, 0.3, 0.2);
+        const bumperMaterial = new THREE.MeshLambertMaterial({ color: 0x1c1c1c });
+        const frontBumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
+        frontBumper.position.set(0, -0.5, -3.4); // At actual front (negative Z)
+        frontBumper.castShadow = true;
+        this.vehicle.add(frontBumper);
+        this.vehicleParts.frontBumper = frontBumper;
+
+        // Create rear bumper
+        const rearBumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
+        rearBumper.position.set(0, -0.5, 3.4); // At actual rear (positive Z)
+        rearBumper.castShadow = true;
+        this.vehicle.add(rearBumper);
+        this.vehicleParts.rearBumper = rearBumper;
+
+        // Create spare tire on back (at the rear)
+        const spareGeometry = new THREE.CylinderGeometry(0.7, 0.7, 0.3, 16);
+        const spareMaterial = new THREE.MeshLambertMaterial({ color: 0x1c1c1c });
+        const spareTire = new THREE.Mesh(spareGeometry, spareMaterial);
+        spareTire.position.set(0, 0.2, 3.5); // At the back (positive Z)
+        spareTire.rotation.x = Math.PI / 2;
+        spareTire.castShadow = true;
+        this.vehicle.add(spareTire);
+        this.vehicleParts.spareTire = spareTire;
+
+        // Create antenna
+        const antennaGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1.5);
+        const antennaMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+        const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
+        antenna.position.set(-1.5, 1.6, -0.8); // Adjusted for reduced length
+        antenna.castShadow = true;
+        this.vehicle.add(antenna);
+        this.vehicleParts.antenna = antenna;
+
+        // Create windshield frame (using roll bars as frame structure)
+        const frameBarGeometry = new THREE.CylinderGeometry(0.08, 0.08, 1.8);
+        const frameMaterial = new THREE.MeshLambertMaterial({ color: 0x1c1c1c });
+
+        // Left windshield frame bar
+        const leftFrameBar = new THREE.Mesh(frameBarGeometry, frameMaterial);
+        leftFrameBar.position.set(-1.0, 1.4, -1.2); // Position for windshield frame
+        leftFrameBar.castShadow = true;
+        this.vehicle.add(leftFrameBar);
+
+        // Right windshield frame bar
+        const rightFrameBar = new THREE.Mesh(frameBarGeometry, frameMaterial);
+        rightFrameBar.position.set(1.0, 1.4, -1.2); // Position for windshield frame
+        rightFrameBar.castShadow = true;
+        this.vehicle.add(rightFrameBar);
+
+        // Top windshield frame bar
+        const topFrameBarGeometry = new THREE.CylinderGeometry(0.06, 0.06, 2.0);
+        const topFrameBar = new THREE.Mesh(topFrameBarGeometry, frameMaterial);
+        topFrameBar.position.set(0, 2.2, -1.2);
+        topFrameBar.rotation.z = Math.PI / 2;
+        topFrameBar.castShadow = true;
+        this.vehicle.add(topFrameBar);
+
+        this.vehicleParts.windshieldFrame = [leftFrameBar, rightFrameBar, topFrameBar];
+
+        // Create exhaust pipe
+        const tailPipeGeometry = new THREE.CylinderGeometry(0.12, 0.12, 0.8);
+        const tailPipeMaterial = new THREE.MeshLambertMaterial({ color: 0x696969 });
+        const tailPipe = new THREE.Mesh(tailPipeGeometry, tailPipeMaterial);
+        tailPipe.position.set(1.5, -0.4, -2.6); // Adjusted for reduced length
+        tailPipe.rotation.z = Math.PI / 2;
+        tailPipe.castShadow = true;
+        this.vehicle.add(tailPipe);
+        this.vehicleParts.tailPipe = tailPipe;
+
         this.vehicle.position.copy(this.vehiclePosition);
         this.scene.add(this.vehicle);
     }
@@ -293,6 +572,122 @@ class PrairieDrivingGame {
         return false; // No collision
     }
 
+    applyDamage() {
+        if (this.damageLevel >= 3) return; // Already completely wrecked
+
+        const currentTime = Date.now();
+        if (currentTime - this.lastCollisionTime < this.collisionCooldown) {
+            return; // Still in cooldown period
+        }
+
+        this.lastCollisionTime = currentTime;
+        this.damageLevel++;
+        this.updateVehicleVisuals();
+
+        console.log(`Vehicle damage level: ${this.damageLevel}`);
+
+        if (this.damageLevel >= 3) {
+            this.gameOver();
+        }
+    }
+
+    updateVehicleVisuals() {
+        switch (this.damageLevel) {
+            case 1: // Minor damage: bent antenna, single crack in windshield
+                // Bend antenna
+                if (this.vehicleParts.antenna) {
+                    this.vehicleParts.antenna.rotation.z = Math.PI / 6; // 30 degree bend
+                }
+                // Show single crack in windshield
+                if (this.vehicleParts.windshieldCracks?.[0]) {
+                    this.vehicleParts.windshieldCracks[0].material.opacity = 1.0; // Show single crack
+                }
+                break;
+
+            case 2: // Major damage: antenna removed, multiple cracks in windshield, left door falls off
+                // Remove antenna
+                if (this.vehicleParts.antenna) {
+                    this.vehicle.remove(this.vehicleParts.antenna);
+                    this.vehicleParts.antenna = null;
+                }
+                // Show multiple cracks in windshield
+                if (this.vehicleParts.windshieldCracks?.[1]) {
+                    this.vehicleParts.windshieldCracks[1].material.opacity = 1.0; // Show multiple cracks
+                }
+                // Remove left door
+                if (this.vehicleParts.leftDoor) {
+                    this.vehicle.remove(this.vehicleParts.leftDoor);
+                    this.vehicleParts.leftDoor = null;
+                }
+                break;
+
+            case 3: // Completely wrecked: windshield completely invisible
+                // Make windshield completely invisible
+                if (this.vehicleParts.windshield) {
+                    this.vehicleParts.windshield.material.opacity = 0;
+                }
+                // Hide all crack overlays
+                if (this.vehicleParts.windshieldCracks) {
+                    for (const crack of this.vehicleParts.windshieldCracks) {
+                        crack.material.opacity = 0;
+                    }
+                }
+                // Remove right door
+                if (this.vehicleParts.rightDoor) {
+                    this.vehicle.remove(this.vehicleParts.rightDoor);
+                    this.vehicleParts.rightDoor = null;
+                }
+                // Damage body color (need to handle body group)
+                if (this.vehicleParts.body?.children) {
+                    for (const part of this.vehicleParts.body.children) {
+                        if (part.material) {
+                            part.material.color.setHex(0x444444); // Dark gray
+                        }
+                    }
+                }
+                // Remove tail pipe
+                if (this.vehicleParts.tailPipe) {
+                    this.vehicle.remove(this.vehicleParts.tailPipe);
+                    this.vehicleParts.tailPipe = null;
+                }
+                break;
+        }
+    }
+
+    gameOver() {
+        // Create game over overlay
+        const gameOverDiv = document.createElement('div');
+        gameOverDiv.id = 'gameOver';
+        gameOverDiv.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 24px;
+            z-index: 300;
+        `;
+        gameOverDiv.innerHTML = `
+            <h2>VEHICLE DESTROYED!</h2>
+            <p>Your jeep is completely wrecked and can no longer be driven.</p>
+            <button onclick="location.reload()" style="
+                padding: 10px 20px;
+                font-size: 18px;
+                background: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                margin-top: 20px;
+            ">Restart Game</button>
+        `;
+        document.body.appendChild(gameOverDiv);
+    }
+
     updateVehicle() {
         const deltaTime = this.clock.getDelta();
 
@@ -301,11 +696,11 @@ class PrairieDrivingGame {
         let turning = 0;
 
         if (this.keys.KeyW || this.keys.ArrowUp) {
-            acceleration = 50;
+            acceleration = 150;
             console.log('Moving forward');
         }
         if (this.keys.KeyS || this.keys.ArrowDown) {
-            acceleration = -35;
+            acceleration = -100;
             console.log('Moving backward');
         }
         if (this.keys.KeyA || this.keys.ArrowLeft) {
@@ -323,8 +718,33 @@ class PrairieDrivingGame {
 
         // Update speed and rotation
         this.speed += acceleration * deltaTime;
-        this.speed *= 0.95; // Natural deceleration
+        this.speed *= 0.98; // Reduced natural deceleration to maintain speed better
         this.vehicleRotation += turning * deltaTime;
+
+        // Apply terrain-based speed modifications
+        const terrainSlope = this.getTerrainSlope(this.vehiclePosition.x, this.vehiclePosition.z);
+        const slopeEffect = terrainSlope * 30; // Amplify slope effect
+
+        // Apply slope-based acceleration/deceleration
+        this.speed += slopeEffect * deltaTime;
+
+        // Apply speed limits based on terrain
+        let currentMaxSpeed = this.maxSpeed;
+        if (terrainSlope < -0.1) {
+            // Going downhill (negative slope)
+            currentMaxSpeed = this.maxDownhillSpeed;
+        } else if (terrainSlope > 0.1) {
+            // Going uphill (positive slope)
+            currentMaxSpeed = this.minUphillSpeed;
+        }
+
+        // Clamp speed to current terrain-based limits
+        if (this.speed > currentMaxSpeed) {
+            this.speed = currentMaxSpeed;
+        } else if (this.speed < -currentMaxSpeed * 0.7) {
+            // Allow reverse but limited
+            this.speed = -currentMaxSpeed * 0.7;
+        }
 
         // Calculate movement (fix inverted controls)
         const moveX = -Math.sin(this.vehicleRotation) * this.speed * deltaTime;
@@ -340,8 +760,9 @@ class PrairieDrivingGame {
             this.vehiclePosition.x = newX;
             this.vehiclePosition.z = newZ;
         } else {
-            // Collision detected, stop the vehicle
+            // Collision detected, stop the vehicle and apply damage
             this.speed *= 0.1; // Dramatically reduce speed on collision
+            this.applyDamage();
         }
 
         // Get terrain height at vehicle position and add vehicle height offset
