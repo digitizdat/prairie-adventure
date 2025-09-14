@@ -1,0 +1,19 @@
+{
+  "name": "prairie-adventure",
+  "version": "1.0.0",
+  "description": "A 3D prairie driving game built with Three.js",
+  "main": "game.js",
+  "scripts": {
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "check": "biome check --write .",
+    "ci": "biome ci ."
+  },
+  "keywords": ["game", "3d", "threejs", "prairie", "driving"],
+  "author": "",
+  "license": "GPL-3.0",
+  "devDependencies": {
+    "@biomejs/biome": "^1.8.3",
+    "lefthook": "^1.7.0"
+  }
+}
